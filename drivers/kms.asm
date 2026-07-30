@@ -234,13 +234,113 @@ kms_init:
 
 kms_clear_screen:
     pusha
-    mov edi, [kms_lfb_ptr]
-    mov eax, 1024 * 768
-    mov ecx, eax
-    mov eax, [kms_bg_color]
+    call kms_draw_wallpaper
+    call kms_draw_terminal_box
+    mov dword [kms_cursor_x], 35
+    mov dword [kms_cursor_y], 55
+    popa
+    ret
+
+kms_draw_wallpaper:
+    pusha
+    mov esi, wallpaper_bmp
+    cmp word [esi], 0x4D42        ; Magic header 'BM'
+    jne .done
+
+    mov ebp, [esi + 10]           ; Offset dos pixels no BMP
+    add ebp, esi                  ; ebp = ponteiro para inicio dos pixels
+
+    mov ebx, 0                    ; ebx = y na tela (0..767)
+
+.row_loop:
+    cmp ebx, 768
+    jge .done
+
+    ; Endereço no LFB: edi = kms_lfb_ptr + ebx * pitch
+    mov edi, ebx
+    imul edi, [kms_pitch]
+    add edi, [kms_lfb_ptr]
+
+    ; Endereço no BMP (bottom-up): esi = ebp + (767 - ebx) * pitch
+    mov eax, 767
+    sub eax, ebx
+    imul eax, [kms_pitch]
+    add eax, ebp
+    mov esi, eax
+
+    ; Copia linha inteira de 1024 pixels (4096 bytes) de alta velocidade
+    mov ecx, 1024
+    rep movsd
+
+    inc ebx
+    jmp .row_loop
+
+.done:
+    popa
+    ret
+
+kms_draw_terminal_box:
+    pusha
+
+    ; 1. Barra de Titulo do Terminal (Y: 20..44)
+    mov ebx, 20
+.hdr_row:
+    cmp ebx, 45
+    jge .hdr_done
+
+    mov edi, ebx
+    imul edi, [kms_pitch]
+    add edi, [kms_lfb_ptr]
+    add edi, 20 * 4             ; X = 20
+
+    mov ecx, 984                ; Largura 984 pixels
+    cmp ebx, 20
+    je .hdr_accent
+
+    mov eax, 0x001E293B         ; Cor Slate Dark Glass para o cabeçalho
+.hdr_loop:
+    mov [edi], eax
+    add edi, 4
+    dec ecx
+    jnz .hdr_loop
+    inc ebx
+    jmp .hdr_row
+
+.hdr_accent:
+    mov eax, 0x003B82F6         ; Linha de acento Azul Eletrico
     rep stosd
-    mov dword [kms_cursor_x], 20
-    mov dword [kms_cursor_y], 20
+    inc ebx
+    jmp .hdr_row
+
+.hdr_done:
+
+    ; 2. Area de Conteudo do Terminal em Vidro Fume Semitransparente (Y: 45..748)
+    mov ebx, 45
+.glass_row:
+    cmp ebx, 748
+    jge .glass_done
+
+    mov edi, ebx
+    imul edi, [kms_pitch]
+    add edi, [kms_lfb_ptr]
+    add edi, 20 * 4             ; X = 20
+
+    mov ecx, 984                ; Largura 984 pixels
+.glass_col:
+    mov eax, [edi]              ; Le o pixel do Wallpaper de fundo
+    and eax, 0x00FCFCFC         ; MASCARA CRUCIAL: Zera os 2 bits inferiores de R, G, B para evitar vazamento entre canais!
+    shr eax, 2                  ; 25% da intensidade do wallpaper
+    add eax, 0x000F172A         ; Adiciona tom escuro de vidro fume azulado
+    mov [edi], eax              ; Grava no Framebuffer!
+    add edi, 4
+    dec ecx
+    jnz .glass_col
+
+
+    inc ebx
+    jmp .glass_row
+
+.glass_done:
     popa
     ret
 
@@ -283,15 +383,11 @@ kms_print_char:
     shl esi, 3                  ; * 8 bytes por glifo
     add esi, font_8x8           ; esi = &font_8x8[(char-32)*8]
 
-
-
     mov edx, 0                  ; edx = linha atual (0..7)
 .row_loop:
     cmp edx, 8
     jge .char_done
 
-    ; Usar EDI para guardar o byte da fonte (nao CL/CH!)
-    ; assim nao conflita com ecx que kms_put_pixel sobrescreve via popa
     movzx edi, byte [esi + edx] ; edi = byte de fonte para a linha edx
     mov ecx, 0                  ; ecx = coluna atual (0..7)
 
@@ -304,17 +400,11 @@ kms_print_char:
     mov ebx, [kms_cursor_y]
     add ebx, edx                ; ebx = y = cursor_y + linha
 
-    ; Salva ecx (coluna) antes de sobrescrever com cor
     push ecx
     test edi, 0x80
-    jz .bg_pixel
+    jz .pixel_done              ; Fundo transparente: nao sobrescreve o vidro!
 
     mov ecx, [kms_fg_color]
-    call kms_put_pixel
-    jmp .pixel_done
-
-.bg_pixel:
-    mov ecx, [kms_bg_color]
     call kms_put_pixel
 
 .pixel_done:
@@ -330,44 +420,79 @@ kms_print_char:
 .char_done:
     add dword [kms_cursor_x], 8
     mov eax, [kms_width]
-    sub eax, 10
+    sub eax, 30
     cmp [kms_cursor_x], eax
     jl .done
 .newline:
-    mov dword [kms_cursor_x], 20
-    add dword [kms_cursor_y], 12
+    mov dword [kms_cursor_x], 35
+    add dword [kms_cursor_y], 14
     mov eax, [kms_height]
-    sub eax, 16
+    sub eax, 40
     cmp [kms_cursor_y], eax
     jl .done
     call kms_clear_screen
     jmp .done
 
 .backspace:
-    cmp dword [kms_cursor_x], 20
+    cmp dword [kms_cursor_x], 35
     jle .done
     sub dword [kms_cursor_x], 8
-    mov ecx, 0
+
+    ; Restaura o vidro translúcido limpo na célula de 8x14 pixels do caractere apagado
+    mov ecx, 0                  ; ecx = linha y (0..13)
 .bs_row:
-    cmp ecx, 8
+    cmp ecx, 14
     jge .done
-    mov edx, 0
+    mov edx, 0                  ; edx = coluna x (0..7)
 .bs_col:
     cmp edx, 8
     jge .bs_next_row
+
     mov eax, [kms_cursor_x]
-    add eax, edx
+    add eax, edx                ; eax = x
     mov ebx, [kms_cursor_y]
-    add ebx, ecx
+    add ebx, ecx                ; ebx = y
+
     push ecx
-    mov ecx, [kms_bg_color]
-    call kms_put_pixel
+    push edx
+
+    ; 1. Endereço de destino no LFB: edi = kms_lfb_ptr + y * pitch + x * 4
+    mov edi, ebx
+    imul edi, [kms_pitch]
+    mov edx, eax
+    shl edx, 2
+    add edi, edx
+    add edi, [kms_lfb_ptr]
+
+    ; 2. Endereço de origem no Wallpaper (bottom-up): esi = wallpaper_bmp + offset + (767 - y) * pitch + x * 4
+    mov esi, wallpaper_bmp
+    mov ebp, [esi + 10]         ; Offset dos pixels no BMP
+    add ebp, esi
+
+    mov esi, 767
+    sub esi, ebx
+    imul esi, [kms_pitch]
+    add esi, ebp
+    mov edx, eax
+    shl edx, 2
+    add esi, edx
+
+    ; 3. Le o pixel original do wallpaper, aplica a mascara e o vidro fume
+    mov eax, [esi]
+    and eax, 0x00FCFCFC
+    shr eax, 2
+    add eax, 0x000F172A
+    mov [edi], eax              ; Grava a celula limpa de vidro no Framebuffer!
+
+    pop edx
     pop ecx
     inc edx
     jmp .bs_col
+
 .bs_next_row:
     inc ecx
     jmp .bs_row
+
 
 .done:
     popa
@@ -386,3 +511,8 @@ kms_print_string:
 .s_done:
     popa
     ret
+
+section .rodata
+align 16
+wallpaper_bmp:
+    incbin "wallpaper.bmp"
