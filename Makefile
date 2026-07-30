@@ -10,8 +10,8 @@ OBJS = boot/boot.o \
        kernel/main.o \
        kernel/gdt.o \
        kernel/idt.o \
+       drivers/kms.o \
        drivers/mouse.o \
-       drivers/vbe.o \
        drivers/bmp.o
 
 ISO_FILE = SKG.iso

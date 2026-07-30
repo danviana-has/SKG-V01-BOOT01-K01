@@ -3,8 +3,10 @@ global kernel_main
 extern gdt_init
 extern idt_init
 extern mouse_init
-extern mouse_get_x
-extern mouse_get_y
+extern kms_init
+extern kms_clear_screen
+extern kms_print_string
+extern kms_print_char
 
 section .bss
 align 4096
@@ -17,45 +19,37 @@ vfs_data:   resb 2048          ; 8 slots de 256 bytes para conteudo
 vfs_used:   resb 8             ; 8 flags de uso (0 = livre, 1 = ocupado)
 
 section .data
-vga_ptr:    dd 0xB8000
-cursor_pos: dd 0
-
-msg_banner: db "================================--------------------------------", 10
-            db "                 SKG CORE OS - ARQUITETURA GMK v1.1             ", 10
-            db "================================--------------------------------", 10, 0
-msg_m_load: db "[GMK] Carregando Gerenciador de Modulos GM Driver (.gmd)...", 10, 0
-msg_d_vga:  db "  [OK] DRIVER REGISTRADO: vga.gmd      [0x00010000]", 10, 0
-msg_d_kbd:  db "  [OK] DRIVER REGISTRADO: keyboard.gmd [0x00010000]", 10, 0
-msg_d_pit:  db "  [OK] DRIVER REGISTRADO: pit.gmd      [0x00010000]", 10, 0
-msg_d_gmfs: db "  [OK] DRIVER REGISTRADO: gmfs.gmd     [0x00010000]", 10, 0
-msg_d_mse:  db "  [OK] DRIVER REGISTRADO: mouse.gmd    [0x00010001]", 10, 0
-msg_d_vbe:  db "  [OK] DRIVER REGISTRADO: vbe32.gmd    [0x00010001]", 10, 0
-msg_d_bmp:  db "  [OK] DRIVER REGISTRADO: bmp32.gmd    [0x00010001]", 10, 0
-msg_ready:  db 10, "SKG Core v1.1 inicializado no Modo Texto VGA! Digite HELP.", 10, 0
-msg_prompt: db "ROOT@SKG-CORE:~# ", 0
+msg_banner: db "==================================================================", 10
+            db "      SKG CORE OS - KERNEL UPDATED OK (KMS GRAPHICS v2.0)     ", 10
+            db "==================================================================", 10, 0
+msg_m_load: db "[GMK] Carregando Sub-sistema de Video Direct Framebuffer (KMS)...", 10, 0
+msg_d_kms:  db "  [OK] DRIVER MODO KMS ATIVO  : kms_lfb.gmd  [1024x768 @ 32bpp]", 10, 0
+msg_d_kbd:  db "  [OK] DRIVER REGISTRADO      : keyboard.gmd [0x00010000]", 10, 0
+msg_d_pit:  db "  [OK] DRIVER REGISTRADO      : pit.gmd      [0x00010000]", 10, 0
+msg_d_gmfs: db "  [OK] DRIVER REGISTRADO      : gmfs.gmd     [0x00010000]", 10, 0
+msg_d_mse:  db "  [OK] DRIVER REGISTRADO      : mouse.gmd    [0x00010001]", 10, 0
+msg_d_bmp:  db "  [OK] DRIVER REGISTRADO      : bmp32.gmd    [0x00010001]", 10, 0
+msg_ready:  db 10, "SKG Core v2.0 (KMS Native Console) Inicializado! Digite HELP.", 10, 0
+msg_prompt: db "ROOT@SKG-KMS:~# ", 0
 msg_newline:db 10, 0
 
-msg_cmd_help: db 10, "Comandos SKG disponiveis:", 10
+msg_cmd_help: db 10, "Comandos SKG KMS disponiveis:", 10
               db "  HELP                  - Exibe esta mensagem de ajuda", 10
               db "  VER                   - Versao do Kernel SKG Core", 10
-              db "  SYSINFO               - Informacoes da arquitetura GMK", 10
-              db "  DRIVERS               - Lista modulos .gmd ativos", 10
-              db "  MOUSE                 - Exibe status do driver de Mouse PS/2", 10
-              db "  VBEINFO               - Status dos drivers VBE/VESA 32bpp", 10
+              db "  SYSINFO               - Informacoes da arquitetura KMS", 10
+              db "  DRIVERS               - Lista modulos de hardware ativos", 10
               db "  LS                    - Lista todos os arquivos da VFS", 10
               db "  WRITE <arq.txt> <txt> - Cria/escreve um arquivo de texto", 10
               db "  CAT <arquivo>         - Le e exibe o conteudo do arquivo", 10
               db "  DELETE <arquivo>      - Deleta um arquivo", 10
-              db "  CLEAR                 - Limpa o terminal VGA", 10
+              db "  CLEAR / CLS           - Limpa o console grafico KMS", 10
               db "  REBOOT                - Reinicia o sistema", 10, 0
 
-msg_cmd_ver:  db 10, "SKG Core Kernel v1.1.0 [GMK Architecture - 32-bit Ring0]", 10, 0
-msg_cmd_sys:  db 10, "[SKG SYSINFO] Protected Mode 32-bit - GMK Dual Display Ready", 10, 0
-msg_cmd_drv:  db 10, "Modulos: vga, keyboard, pit, gmfs, mouse, vbe32, bmp32", 10, 0
-msg_cmd_mse:  db 10, "[MOUSE PS/2] Driver Ativo - Streaming IRQ12 Habilitado.", 10, 0
-msg_cmd_vbe:  db 10, "[VBE/VESA 32bpp] LFB Ativo em 0xE0000000 (Compatibilidade pronta)", 10, 0
+msg_cmd_ver:  db 10, "SKG Core Kernel v2.0.0 [GMK KMS Architecture - 32-bit Direct LFB]", 10, 0
+msg_cmd_sys:  db 10, "[SKG SYSINFO] Protected Mode 32-bit - KMS Direct Framebuffer Active", 10, 0
+msg_cmd_drv:  db 10, "Modulos Ativos: kms_lfb, keyboard, pit, gmfs, mouse, bmp32", 10, 0
 
-msg_write_ok: db 10, "Arquivo gravado na VRAM/VFS com sucesso!", 10, 0
+msg_write_ok: db 10, "Arquivo gravado na VFS com sucesso!", 10, 0
 msg_del_ok:   db 10, "Arquivo removido do sistema de arquivos.", 10, 0
 msg_not_found:db 10, "Erro: Arquivo nao encontrado na VFS.", 10, 0
 msg_unknown:  db 10, "Comando nao reconhecido. Digite HELP.", 10, 0
@@ -64,7 +58,6 @@ msg_panic_1:  db 10, 10, "!!! KERNEL PANIC: CRITICAL SYSTEM FILE DELETED !!!", 1
 msg_panic_2:  db "FATAL: SYSKERNELAPP.GMK FOI REMOVIDO DA MEMORIA!", 10, 0
 msg_panic_3:  db "O SISTEMA OPERACIONAL ENTRARA EM AUTODESTRUICAO...", 10, 0
 
-; Tabela de Scancodes Alinhada Corretamente
 scancode_map:
     db 0, 27, "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", 8, 9
     db "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", 13, 0
@@ -77,12 +70,15 @@ kernel_main:
     call gdt_init
     call idt_init
 
+    push ebx
+    push eax
+    call kms_init
+    add esp, 8
+
     mov al, 0xAE
     out 0x64, al
+    call mouse_init
 
-    call mouse_init            ; Inicializa driver de Mouse PS/2
-
-    ; Flush no Buffer PS/2 para descartar ACKs residuais da BIOS/VirtualBox
 .flush_ps2:
     in al, 0x64
     test al, 1
@@ -93,29 +89,26 @@ kernel_main:
 
     call init_default_vfs
 
-    call clear_vga
     mov esi, msg_banner
-    call print_vga
+    call kms_print_string
 
     mov esi, msg_m_load
-    call print_vga
-    mov esi, msg_d_vga
-    call print_vga
+    call kms_print_string
+    mov esi, msg_d_kms
+    call kms_print_string
     mov esi, msg_d_kbd
-    call print_vga
+    call kms_print_string
     mov esi, msg_d_pit
-    call print_vga
+    call kms_print_string
     mov esi, msg_d_gmfs
-    call print_vga
+    call kms_print_string
     mov esi, msg_d_mse
-    call print_vga
-    mov esi, msg_d_vbe
-    call print_vga
+    call kms_print_string
     mov esi, msg_d_bmp
-    call print_vga
+    call kms_print_string
 
     mov esi, msg_ready
-    call print_vga
+    call kms_print_string
     call print_prompt
 
 .cli_loop:
@@ -125,72 +118,42 @@ kernel_main:
 init_default_vfs:
     pusha
     mov byte [vfs_used], 1
-    mov dword [vfs_names], "SYSK"
-    mov dword [vfs_names+4], "ERNE"
-    mov dword [vfs_names+8], "LAPP"
-    mov dword [vfs_names+12], ".GMK"
-    mov byte [vfs_names+16], 0
-    mov dword [vfs_data], "[CORE KERNEL BINARY DATA]"
+    
+    mov dword [vfs_names],    "SYSK"
+    mov dword [vfs_names+4],  "ERNE"
+    mov dword [vfs_names+8],  "LAPP"
+    mov word  [vfs_names+12], ".G"
+    mov word  [vfs_names+14], "MK"
+    mov byte  [vfs_names+16], 0
+    
+    mov dword [vfs_data],    "[COR"
+    mov dword [vfs_data+4],  "E KE"
+    mov dword [vfs_data+8],  "RNEL"
+    mov dword [vfs_data+12], " BIN"
+    mov dword [vfs_data+16], "ARY]"
+    mov byte  [vfs_data+20], 0
 
     mov byte [vfs_used+1], 1
     mov dword [vfs_names+64], "READ"
     mov dword [vfs_names+68], "ME.T"
-    mov dword [vfs_names+72], "XT"
-    mov byte [vfs_names+74], 0
+    mov word  [vfs_names+72], "XT"
+    mov byte  [vfs_names+74], 0
+    
     mov dword [vfs_data+256], "BENV"
     mov dword [vfs_data+260], "INDO"
     mov dword [vfs_data+264], " AO "
     mov dword [vfs_data+268], "SKG!"
-    mov byte [vfs_data+272], 0
+    mov byte  [vfs_data+272], 0
     popa
     ret
 
 print_prompt:
     mov esi, msg_newline
-    call print_vga
+    call kms_print_string
     mov esi, msg_prompt
-    call print_vga
+    call kms_print_string
     mov dword [cmd_len], 0
     mov byte [cmd_buffer], 0
-    ret
-
-clear_vga:
-    mov edi, 0xB8000
-    mov ecx, 2000
-    mov ax, 0x0720
-    rep stosw
-    mov dword [cursor_pos], 0
-    ret
-
-print_vga:
-    pusha
-.p_loop:
-    lodsb
-    cmp al, 0
-    je .p_done
-    cmp al, 10
-    je .p_newline
-
-    mov edi, [cursor_pos]
-    shl edi, 1
-    add edi, 0xB8000
-    mov ah, 0x0F
-    mov [edi], ax
-    inc dword [cursor_pos]
-    jmp .p_loop
-
-.p_newline:
-    mov eax, [cursor_pos]
-    mov ebx, 80
-    xor edx, edx
-    div ebx
-    inc eax
-    mul ebx
-    mov [cursor_pos], eax
-    jmp .p_loop
-
-.p_done:
-    popa
     ret
 
 poll_keyboard:
@@ -199,14 +162,14 @@ poll_keyboard:
     test al, 1
     jz .k_done
 
-    test al, 0x20              ; Ignora se forem dados do mouse na porta aux
+    test al, 0x20
     jnz .k_flush
 
     in al, 0x60
-    cmp al, 0xE0               ; Ignora bytes de extensao (setas, etc)
+    cmp al, 0xE0
     je .k_done
 
-    test al, 0x80              ; Ignora tecla ao ser solta (Key Release)
+    test al, 0x80
     jnz .k_done
 
     movzx eax, al
@@ -230,13 +193,8 @@ poll_keyboard:
     inc dword [cmd_len]
     mov byte [cmd_buffer + edx + 1], 0
 
-    mov edi, [cursor_pos]
-    shl edi, 1
-    add edi, 0xB8000
-    mov ah, 0x0E
     mov al, bl
-    mov [edi], ax
-    inc dword [cursor_pos]
+    call kms_print_char
     jmp .k_done
 
 .k_bs:
@@ -246,11 +204,8 @@ poll_keyboard:
     dec dword [cmd_len]
     mov edx, [cmd_len]
     mov byte [cmd_buffer + edx], 0
-    dec dword [cursor_pos]
-    mov edi, [cursor_pos]
-    shl edi, 1
-    add edi, 0xB8000
-    mov word [edi], 0x0720
+    mov al, 8
+    call kms_print_char
     jmp .k_done
 
 .k_enter:
@@ -278,7 +233,7 @@ process_command:
     cmp byte [esi+1], "E"
     jne .chk_ver
     mov esi, msg_cmd_help
-    call print_vga
+    call kms_print_string
     jmp .cmd_done
 
 ; --- VER ---
@@ -288,7 +243,7 @@ process_command:
     cmp byte [esi+1], "E"
     jne .chk_sys
     mov esi, msg_cmd_ver
-    call print_vga
+    call kms_print_string
     jmp .cmd_done
 
 ; --- SYSINFO ---
@@ -298,37 +253,17 @@ process_command:
     cmp byte [esi+1], "Y"
     jne .chk_drv
     mov esi, msg_cmd_sys
-    call print_vga
+    call kms_print_string
     jmp .cmd_done
 
 ; --- DRIVERS ---
 .chk_drv:
     cmp byte [esi], "D"
-    jne .chk_mse
+    jne .chk_ls
     cmp byte [esi+1], "R"
-    jne .chk_mse
+    jne .chk_ls
     mov esi, msg_cmd_drv
-    call print_vga
-    jmp .cmd_done
-
-; --- MOUSE ---
-.chk_mse:
-    cmp byte [esi], "M"
-    jne .chk_vbe
-    cmp byte [esi+1], "O"
-    jne .chk_vbe
-    mov esi, msg_cmd_mse
-    call print_vga
-    jmp .cmd_done
-
-; --- VBEINFO ---
-.chk_vbe:
-    cmp byte [esi], "V"
-    jne .chk_ls
-    cmp byte [esi+1], "B"
-    jne .chk_ls
-    mov esi, msg_cmd_vbe
-    call print_vga
+    call kms_print_string
     jmp .cmd_done
 
 ; --- LS ---
@@ -370,13 +305,16 @@ process_command:
     call cmd_delete
     jmp .cmd_done
 
-; --- CLEAR ---
+; --- CLEAR / CLS ---
 .chk_clr:
     cmp byte [esi], "C"
     jne .chk_reb
     cmp byte [esi+1], "L"
+    je .do_clear
+    cmp byte [esi+1], "L"
     jne .chk_reb
-    call clear_vga
+.do_clear:
+    call kms_clear_screen
     jmp .cmd_done
 
 ; --- REBOOT ---
@@ -391,7 +329,7 @@ process_command:
 
 .unk:
     mov esi, msg_unknown
-    call print_vga
+    call kms_print_string
 
 .cmd_done:
     popa
@@ -408,13 +346,13 @@ cmd_ls:
     jne .ls_next
 
     mov esi, msg_newline
-    call print_vga
+    call kms_print_string
 
     mov eax, ecx
     shl eax, 6
     add eax, vfs_names
     mov esi, eax
-    call print_vga
+    call kms_print_string
 .ls_next:
     inc ecx
     jmp .ls_loop
@@ -451,11 +389,11 @@ cmd_write:
     mov dword [edi+4], "O RO"
     mov dword [edi+8], "DAND"
     mov dword [edi+12], "O SK"
-    mov dword [edi+16], "G!"
-    mov byte [edi+20], 0
+    mov word  [edi+16], "G!"
+    mov byte  [edi+18], 0
 
     mov esi, msg_write_ok
-    call print_vga
+    call kms_print_string
 .w_done:
     popa
     ret
@@ -498,12 +436,12 @@ cmd_cat:
 
 .cat_found:
     mov esi, msg_newline
-    call print_vga
+    call kms_print_string
     mov eax, ecx
     shl eax, 8
     add eax, vfs_data
     mov esi, eax
-    call print_vga
+    call kms_print_string
     popa
     ret
 
@@ -513,7 +451,7 @@ cmd_cat:
 
 .cat_not_found:
     mov esi, msg_not_found
-    call print_vga
+    call kms_print_string
     popa
     ret
 
@@ -529,26 +467,20 @@ cmd_delete:
 
     mov byte [vfs_used + 1], 0
     mov esi, msg_del_ok
-    call print_vga
+    call kms_print_string
     popa
     ret
 
 .trigger_panic:
     mov byte [vfs_used], 0
-    call clear_vga
+    call kms_clear_screen
 
-    mov edi, 0xB8000
-    mov ecx, 2000
-    mov ax, 0x4F20
-    rep stosw
-
-    mov dword [cursor_pos], 0
     mov esi, msg_panic_1
-    call print_vga
+    call kms_print_string
     mov esi, msg_panic_2
-    call print_vga
+    call kms_print_string
     mov esi, msg_panic_3
-    call print_vga
+    call kms_print_string
 
     mov ecx, 0x0FFFFFFF
 .delay:
