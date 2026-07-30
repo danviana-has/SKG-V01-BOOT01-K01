@@ -3,7 +3,9 @@ global kernel_main
 extern gdt_init
 extern idt_init
 extern mouse_init
+extern mouse_process_byte
 extern kms_init
+
 extern kms_clear_screen
 extern kms_print_string
 extern kms_print_char
@@ -112,8 +114,23 @@ kernel_main:
     call print_prompt
 
 .cli_loop:
+    call poll_mouse
     call poll_keyboard
     jmp .cli_loop
+
+poll_mouse:
+    pusha
+    in al, 0x64
+    test al, 0x01
+    jz .m_done
+    test al, 0x20
+    jz .m_done                  ; Se bit 5 == 0, e dado do teclado
+
+    in al, 0x60
+    call mouse_process_byte
+.m_done:
+    popa
+    ret
 
 init_default_vfs:
     pusha
@@ -163,7 +180,8 @@ poll_keyboard:
     jz .k_done
 
     test al, 0x20
-    jnz .k_flush
+    jnz .k_done
+
 
     in al, 0x60
     cmp al, 0xE0

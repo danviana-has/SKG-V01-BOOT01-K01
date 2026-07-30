@@ -8,6 +8,8 @@ global kms_print_string
 global kms_lfb_ptr
 global kms_width
 global kms_height
+global kms_pitch
+
 
 section .data
 header_gmd:
